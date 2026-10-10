@@ -1,0 +1,2967 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>LUMIÈRE ORDER | 席からカンタン、モバイルオーダー体験 Web 3D</title>
+
+  <!-- Three.js ES Modules CDN (Import Map) -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.168.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.168.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    /* ==========================================================================
+       1. リセット & ベーススタイル
+       ========================================================================== */
+    :root {
+      --glass-bg: rgba(24, 19, 16, 0.58);
+      --glass-bg-light: rgba(255, 250, 244, 0.14);
+      --glass-border: rgba(255, 238, 218, 0.22);
+      --glass-highlight: rgba(255, 255, 255, 0.35);
+      --accent-amber: #f59e0b;
+      --accent-warm: #fbbf24;
+      --accent-green: #10b981;
+      --text-primary: #fffaf3;
+      --text-secondary: rgba(255, 245, 232, 0.76);
+      --shadow-soft: 0 16px 40px rgba(8, 5, 3, 0.42);
+      --blur-amount: blur(16px);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      background-color: #120e0b;
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+      overflow-x: hidden;
+      overscroll-behavior-y: none;
+    }
+
+    /* 仮想スクロールコンテナ（500vh） */
+    #scroll-container {
+      position: relative;
+      width: 100%;
+      height: 500vh;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* 全画面固定 Three.js キャンバス */
+    #webgl-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      z-index: 2;
+      touch-action: pan-y;
+      cursor: default;
+    }
+
+    #webgl-canvas.is-draggable {
+      cursor: grab;
+      touch-action: none;
+    }
+    #webgl-canvas.is-dragging {
+      cursor: grabbing;
+    }
+    #webgl-canvas.is-pointer {
+      cursor: pointer;
+    }
+
+    /* ==========================================================================
+       2. UIオーバーレイレイヤー（Glassmorphism & pointer-events制御）
+       ========================================================================== */
+    #ui-layer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 10;
+      pointer-events: none; /* Raycasterと競合しないようベースは透過 */
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 20px 24px;
+    }
+
+    /* インタラクティブなUI要素のみ pointer-events を有効化 */
+    .interactive-ui {
+      pointer-events: auto;
+    }
+
+    /* フロストガラス共通クラス */
+    .glass-panel {
+      background: var(--glass-bg);
+      backdrop-filter: var(--blur-amount);
+      -webkit-backdrop-filter: var(--blur-amount);
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--shadow-soft);
+      border-radius: 18px;
+    }
+
+    /* ==========================================================================
+       3. ヘッダー & ステップ進捗インジケーター
+       ========================================================================== */
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .brand-badge {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 18px;
+      border-radius: 999px;
+    }
+
+    .brand-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-warm), #ea580c);
+      box-shadow: 0 0 12px var(--accent-amber);
+    }
+
+    .brand-title {
+      font-size: 0.92rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    .brand-sub {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      padding-left: 10px;
+      border-left: 1px solid var(--glass-border);
+    }
+
+    .step-status-pill {
+      padding: 10px 16px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .step-badge-num {
+      background: rgba(245, 158, 11, 0.22);
+      border: 1px solid rgba(251, 191, 36, 0.55);
+      color: var(--accent-warm);
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+    }
+
+    /* 右サイド：ステップタイムライン */
+    .step-rail {
+      position: fixed;
+      right: 24px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 14px 10px;
+      border-radius: 999px;
+      z-index: 12;
+    }
+
+    .step-dot-item {
+      position: relative;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.22);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+      cursor: pointer;
+    }
+
+    .step-dot-item.active {
+      background: var(--accent-warm);
+      transform: scale(1.35);
+      box-shadow: 0 0 12px var(--accent-amber);
+    }
+
+    .step-dot-item.completed {
+      background: rgba(16, 185, 129, 0.85);
+      border-color: #34d399;
+    }
+
+    .step-dot-item::before {
+      content: attr(data-label);
+      position: absolute;
+      right: 24px;
+      top: 50%;
+      transform: translateY(-50%) translateX(6px);
+      background: rgba(18, 14, 11, 0.85);
+      border: 1px solid var(--glass-border);
+      color: var(--text-primary);
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.72rem;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s ease;
+    }
+
+    .step-dot-item:hover::before,
+    .step-dot-item.active::before {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    /* ==========================================================================
+       4. 3D空間連動マーカー & 会話吹き出しUI（ステップ2・ステップ5）
+       ========================================================================== */
+    .world-callout {
+      position: fixed;
+      left: 0;
+      top: 0;
+      transform: translate(-50%, -100%);
+      z-index: 11;
+      transition: opacity 0.3s ease;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .world-callout.visible {
+      opacity: 1;
+    }
+
+    .callout-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 15px;
+      border-radius: 999px;
+      background: rgba(24, 18, 14, 0.82);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(251, 191, 36, 0.65);
+      color: #fff;
+      font-size: 0.82rem;
+      font-weight: 600;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 20px rgba(245, 158, 11, 0.3);
+      animation: floatPulse 2s ease-in-out infinite;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .callout-pulse-ring {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent-warm);
+      position: relative;
+    }
+
+    .callout-pulse-ring::after {
+      content: "";
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 2px solid var(--accent-warm);
+      animation: pingRing 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+    }
+
+    /* 店員の会話吹き出しUI */
+    #staff-speech-bubble {
+      position: fixed;
+      left: 50%;
+      top: 24%;
+      transform: translate(-50%, -10px) scale(0.94);
+      max-width: 390px;
+      width: calc(100vw - 40px);
+      padding: 18px 22px;
+      z-index: 15;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    #staff-speech-bubble.visible {
+      opacity: 1;
+      transform: translate(-50%, 0) scale(1);
+      pointer-events: auto;
+    }
+
+    .speech-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .staff-avatar-badge {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #f59e0b, #b45309);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      box-shadow: 0 4px 10px rgba(245, 158, 11, 0.35);
+    }
+
+    .staff-name {
+      font-size: 0.78rem;
+      color: var(--accent-warm);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .speech-text {
+      font-size: 1.02rem;
+      font-weight: 700;
+      line-height: 1.55;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+
+    .speech-sub {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.76rem;
+      color: #6ee7b7;
+      background: rgba(16, 185, 129, 0.14);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      padding: 7px 12px;
+      border-radius: 10px;
+    }
+
+    /* ==========================================================================
+       5. ボトムガイドバナー & ステップ4見渡しUI
+       ========================================================================== */
+    .bottom-hud {
+      width: 100%;
+      max-width: 620px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #look-around-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      border-radius: 999px;
+      background: rgba(255, 248, 240, 0.14);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+      opacity: 0;
+      transform: translateY(12px);
+      transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+      pointer-events: none;
+    }
+
+    #look-around-banner.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    .look-icon {
+      font-size: 1.15rem;
+      animation: panSway 2.4s ease-in-out infinite;
+    }
+
+    .look-text {
+      font-size: 0.86rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .reset-view-btn {
+      background: rgba(255, 255, 255, 0.16);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      color: var(--text-primary);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    .reset-view-btn:hover {
+      background: rgba(255, 255, 255, 0.28);
+    }
+
+    /* ガイドカード */
+    .guide-card {
+      width: 100%;
+      padding: 15px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      transition: border-color 0.35s ease, transform 0.3s ease;
+    }
+
+    .guide-card.locked-emphasis {
+      border-color: rgba(251, 191, 36, 0.75);
+      box-shadow: 0 12px 36px rgba(245, 158, 11, 0.28);
+    }
+
+    .guide-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .guide-title {
+      font-size: 0.94rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .guide-desc {
+      font-size: 0.79rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+
+    .guide-action-btn {
+      background: linear-gradient(135deg, var(--accent-warm), #d97706);
+      color: #1c130c;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 4px 16px rgba(245, 158, 11, 0.4);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .guide-action-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(245, 158, 11, 0.55);
+    }
+
+    .guide-action-btn:active {
+      transform: translateY(0);
+    }
+
+    /* スクロールプログレスバー */
+    .progress-track {
+      width: 100%;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.14);
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-warm), #ea580c);
+      border-radius: 999px;
+      transition: width 0.1s linear;
+    }
+
+    /* ==========================================================================
+       6. ステップ5: モバイルオーダーアプリ風モーダル（ポップアップ展開 & CTA）
+       ========================================================================== */
+    #order-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      background: rgba(10, 7, 5, 0.62);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    #order-modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .phone-modal {
+      width: 100%;
+      max-width: 420px;
+      max-height: 90vh;
+      overflow-y: auto;
+      background: linear-gradient(165deg, rgba(34, 26, 21, 0.94), rgba(19, 14, 11, 0.97));
+      border: 1px solid rgba(255, 235, 210, 0.28);
+      border-radius: 32px;
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      padding: 22px 22px 26px;
+      transform: translateY(28px) scale(0.94);
+      transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+      position: relative;
+    }
+
+    #order-modal-backdrop.open .phone-modal {
+      transform: translateY(0) scale(1);
+    }
+
+    .phone-notch {
+      width: 96px;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.22);
+      border-radius: 999px;
+      margin: 0 auto 16px;
+    }
+
+    .modal-close-btn {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--text-primary);
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .table-tag {
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: var(--accent-warm);
+      background: rgba(245, 158, 11, 0.16);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      padding: 4px 11px;
+      border-radius: 999px;
+    }
+
+    .app-heading {
+      font-size: 1.2rem;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .app-subheading {
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+    }
+
+    /* メニューリスト */
+    .menu-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .menu-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      cursor: pointer;
+      transition: all 0.22s ease;
+    }
+
+    .menu-item.selected {
+      background: rgba(245, 158, 11, 0.14);
+      border-color: rgba(251, 191, 36, 0.65);
+    }
+
+    .menu-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .menu-emoji {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: rgba(255, 245, 230, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.45rem;
+    }
+
+    .menu-name {
+      font-size: 0.9rem;
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+
+    .menu-price {
+      font-size: 0.78rem;
+      color: var(--accent-warm);
+      font-weight: 600;
+    }
+
+    .qty-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .qty-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .qty-val {
+      font-size: 0.88rem;
+      font-weight: 700;
+      min-width: 18px;
+      text-align: center;
+    }
+
+    .order-summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      margin-bottom: 12px;
+      font-size: 0.9rem;
+    }
+
+    .order-total-price {
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: var(--accent-warm);
+    }
+
+    .submit-order-btn {
+      width: 100%;
+      padding: 15px;
+      border-radius: 16px;
+      border: none;
+      background: linear-gradient(135deg, #fbbf24, #d97706);
+      color: #1a110a;
+      font-size: 0.98rem;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 10px 26px rgba(245, 158, 11, 0.4);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .submit-order-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 30px rgba(245, 158, 11, 0.55);
+    }
+
+    /* 注文完了 & PR CTA画面 */
+    #app-screen-complete {
+      display: none;
+      text-align: center;
+      padding: 6px 2px;
+      animation: fadeScaleIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    .complete-check-circle {
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      margin: 6px auto 14px;
+      background: linear-gradient(135deg, #10b981, #059669);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: #fff;
+      box-shadow: 0 0 30px rgba(16, 185, 129, 0.5);
+      animation: popBounce 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .complete-badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #6ee7b7;
+      background: rgba(16, 185, 129, 0.16);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      margin-bottom: 10px;
+    }
+
+    .complete-title {
+      font-size: 1.35rem;
+      font-weight: 800;
+      margin-bottom: 14px;
+      color: #fff;
+    }
+
+    .pr-highlight-box {
+      background: linear-gradient(145deg, rgba(251, 191, 36, 0.16), rgba(234, 88, 12, 0.1));
+      border: 1px solid rgba(251, 191, 36, 0.42);
+      border-radius: 18px;
+      padding: 18px 16px;
+      margin-bottom: 18px;
+    }
+
+    .pr-catchphrase {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: var(--accent-warm);
+      margin-bottom: 6px;
+      letter-spacing: 0.02em;
+    }
+
+    .pr-description {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    .cta-download-btn {
+      width: 100%;
+      padding: 16px;
+      border-radius: 16px;
+      border: none;
+      background: linear-gradient(135deg, #fffaf3, #fde68a);
+      color: #1c1209;
+      font-size: 1rem;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 12px 32px rgba(251, 191, 36, 0.38);
+      margin-bottom: 10px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .cta-download-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 38px rgba(251, 191, 36, 0.55);
+    }
+
+    .secondary-modal-btn {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--text-secondary);
+      width: 100%;
+      padding: 11px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    /* トースト通知 */
+    #toast-notification {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(16, 185, 129, 0.92);
+      backdrop-filter: blur(12px);
+      color: #fff;
+      padding: 12px 22px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s ease;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+
+    #toast-notification.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* アニメーション定義 */
+    @keyframes floatPulse {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+
+    @keyframes pingRing {
+      0% { transform: scale(0.9); opacity: 0.9; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    @keyframes panSway {
+      0%, 100% { transform: translateX(-3px); }
+      50% { transform: translateX(3px); }
+    }
+
+    @keyframes popBounce {
+      0% { transform: scale(0.3); opacity: 0; }
+      70% { transform: scale(1.12); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    @keyframes fadeScaleIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    /* スマホ縦画面向けレスポンシブ調整 */
+    @media (max-width: 640px) {
+      #ui-layer {
+        padding: 14px 14px 18px;
+      }
+      .brand-sub {
+        display: none;
+      }
+      .step-rail {
+        right: 10px;
+        padding: 10px 7px;
+      }
+      .step-dot-item::before {
+        display: none;
+      }
+      .guide-card {
+        padding: 13px 15px;
+      }
+      .guide-title {
+        font-size: 0.86rem;
+      }
+      .guide-desc {
+        font-size: 0.74rem;
+      }
+      #look-around-banner {
+        padding: 9px 14px;
+      }
+      .look-text {
+        font-size: 0.76rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 仮想スクロール領域（500vh） -->
+  <div id="scroll-container" aria-hidden="true"></div>
+
+  <!-- Three.js 全画面固定キャンバス -->
+  <canvas id="webgl-canvas"></canvas>
+
+  <!-- 3D座標に追従するフローティングマーカー（店員 / オーダー端末） -->
+  <div id="staff-callout" class="world-callout interactive-ui">
+    <div class="callout-pill" id="staff-callout-btn">
+      <span class="callout-pulse-ring"></span>
+      <span>💬 店員さんをタップして話す</span>
+    </div>
+  </div>
+
+  <div id="device-callout" class="world-callout interactive-ui">
+    <div class="callout-pill" id="device-callout-btn">
+      <span class="callout-pulse-ring"></span>
+      <span>📱 オーダー端末をタップして注文</span>
+    </div>
+  </div>
+
+  <!-- ステップ2: 店員の会話吹き出しUI -->
+  <div id="staff-speech-bubble" class="glass-panel">
+    <div class="speech-header">
+      <div class="staff-avatar-badge">☕</div>
+      <div>
+        <div class="staff-name">BARISTA STAFF</div>
+      </div>
+    </div>
+    <div class="speech-text">
+      「いらっしゃいませ！こちらの席へどうぞ」
+    </div>
+    <div class="speech-sub">
+      <span>✓ 案内ロック解除済み</span>
+      <span>下にスクロールして席へ ↓</span>
+    </div>
+  </div>
+
+  <!-- 固定UIレイヤー -->
+  <div id="ui-layer">
+    <!-- トップバー -->
+    <header class="top-bar">
+      <div class="brand-badge glass-panel">
+        <span class="brand-dot"></span>
+        <span class="brand-title">LUMIÈRE ORDER</span>
+        <span class="brand-sub">小さなお店のモバイルオーダー体験</span>
+      </div>
+      <div class="step-status-pill glass-panel">
+        <span class="step-badge-num" id="step-badge-num">STEP 1 / 5</span>
+        <span id="step-badge-title">ドアをくぐる</span>
+      </div>
+    </header>
+
+    <!-- 右サイド：ステップナビゲーション -->
+    <nav class="step-rail glass-panel interactive-ui" aria-label="ストーリー進捗">
+      <div class="step-dot-item active" data-step="1" data-label="1. ドアをくぐる"></div>
+      <div class="step-dot-item" data-step="2" data-label="2. 店員と会話"></div>
+      <div class="step-dot-item" data-step="3" data-label="3. 席まで歩く"></div>
+      <div class="step-dot-item" data-step="4" data-label="4. 店内を見渡す"></div>
+      <div class="step-dot-item" data-step="5" data-label="5. 卓上で注文"></div>
+    </nav>
+
+    <!-- ボトムガイド & ステップ4見渡しバナー -->
+    <footer class="bottom-hud">
+      <!-- ステップ4専用フロストグラスバナー -->
+      <div id="look-around-banner">
+        <span class="look-icon">↔️</span>
+        <span class="look-text">ドラッグ/スワイプで店内を見渡せます</span>
+        <button type="button" class="reset-view-btn interactive-ui" id="reset-look-btn">正面に戻す</button>
+      </div>
+
+      <!-- ステップガイドパネル -->
+      <div class="guide-card glass-panel interactive-ui" id="guide-card">
+        <div class="guide-info">
+          <div class="guide-title" id="guide-title">🚪 カフェの入口へ近づいています</div>
+          <div class="guide-desc" id="guide-desc">下にスクロールして、温かみのある店内へ足を踏み入れましょう。</div>
+        </div>
+        <button type="button" class="guide-action-btn" id="guide-action-btn">次へ進む ↓</button>
+      </div>
+
+      <!-- スクロール進捗バー -->
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ステップ5: アプリ風モバイルオーダーモーダル -->
+  <div id="order-modal-backdrop">
+    <div class="phone-modal interactive-ui" role="dialog" aria-modal="true" aria-labelledby="modal-app-title">
+      <div class="phone-notch"></div>
+      <button type="button" class="modal-close-btn" id="modal-close-btn" aria-label="閉じる">✕</button>
+
+      <!-- 画面1: メニュー選択画面 -->
+      <div id="app-screen-menu">
+        <div class="app-header">
+          <span class="table-tag">TABLE 04 • 着席オーダー</span>
+        </div>
+        <h2 class="app-heading" id="modal-app-title">LUMIÈRE CAFÉ メニュー</h2>
+        <p class="app-subheading">店員を呼ばずに、お席からそのままご注文いただけます。</p>
+
+        <div class="menu-list" id="menu-list">
+          <div class="menu-item selected" data-id="latte" data-price="580">
+            <div class="menu-left">
+              <div class="menu-emoji">☕</div>
+              <div>
+                <div class="menu-name">自家製ハニーカフェラテ</div>
+                <div class="menu-price">¥580</div>
+              </div>
+            </div>
+            <div class="qty-controls">
+              <button type="button" class="qty-btn" data-action="dec">−</button>
+              <span class="qty-val" id="qty-latte">1</span>
+              <button type="button" class="qty-btn" data-action="inc">＋</button>
+            </div>
+          </div>
+
+          <div class="menu-item selected" data-id="croissant" data-price="420">
+            <div class="menu-left">
+              <div class="menu-emoji">🥐</div>
+              <div>
+                <div class="menu-name">発酵バタークロワッサン</div>
+                <div class="menu-price">¥420</div>
+              </div>
+            </div>
+            <div class="qty-controls">
+              <button type="button" class="qty-btn" data-action="dec">−</button>
+              <span class="qty-val" id="qty-croissant">1</span>
+              <button type="button" class="qty-btn" data-action="inc">＋</button>
+            </div>
+          </div>
+
+          <div class="menu-item" data-id="cake" data-price="650">
+            <div class="menu-left">
+              <div class="menu-emoji">🍰</div>
+              <div>
+                <div class="menu-name">濃厚バスクチーズケーキ</div>
+                <div class="menu-price">¥650</div>
+              </div>
+            </div>
+            <div class="qty-controls">
+              <button type="button" class="qty-btn" data-action="dec">−</button>
+              <span class="qty-val" id="qty-cake">0</span>
+              <button type="button" class="qty-btn" data-action="inc">＋</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="order-summary-row">
+          <span>合計金額（税込）</span>
+          <span class="order-total-price" id="order-total-price">¥1,000</span>
+        </div>
+
+        <button type="button" class="submit-order-btn" id="submit-order-btn">
+          注文を確定する（待ち時間ゼロ）
+        </button>
+      </div>
+
+      <!-- 画面2: 注文完了アニメーション & PR・CTA表示 -->
+      <div id="app-screen-complete">
+        <div class="complete-check-circle">✓</div>
+        <span class="complete-badge">ORDER #A-104 • キッチンへ即時送信</span>
+        <h3 class="complete-title">アプリで注文完了！</h3>
+
+        <div class="pr-highlight-box">
+          <div class="pr-catchphrase">待ち時間ゼロ。席からカンタン注文</div>
+          <p class="pr-description">
+            専用レジや高額な卓上端末は不要。<br />
+            小さなお店でもQR・スマホひとつで、スタッフの接客ゆとりと客単価アップを同時に叶えます。
+          </p>
+        </div>
+
+        <button type="button" class="cta-download-btn" id="cta-download-btn">
+          <span>📲</span>
+          <span>アプリをダウンロード</span>
+        </button>
+        <button type="button" class="secondary-modal-btn" id="back-to-menu-btn">
+          メニュー選択に戻る
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- トースト通知 -->
+  <div id="toast-notification">✨ アプリのストアページ（デモ）を開きました！</div>
+
+  <!-- ==========================================================================
+       メインスクリプト（Three.js プロシージャル空間構築 & 5ステップ進行制御）
+       ========================================================================== -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    /* ==========================================================================
+       0. 定数・状態管理オブジェクト
+       ========================================================================== */
+    const STEP_RANGES = {
+      STEP1_END: 0.20, // 0.00 〜 0.20: ドアをくぐる
+      STEP2_END: 0.40, // 0.20 〜 0.40: 店員との遭遇・会話
+      STEP3_END: 0.70, // 0.40 〜 0.70: 席まで歩く・着席
+      STEP4_END: 0.90, // 0.70 〜 0.90: 周りを見渡せる
+      STEP5_END: 1.00  // 0.90 〜 1.00: テーブル上の注文ボタンを押す
+    };
+
+    // ステップ2で店員と会話するまでのスクロールロック上限値
+    const STEP2_LOCK_PROGRESS = 0.30;
+
+    // ステップ4の視点移動制限（水平±40度、垂直±15度）
+    const LOOK_LIMIT_YAW = THREE.MathUtils.degToRad(40);
+    const LOOK_LIMIT_PITCH = THREE.MathUtils.degToRad(15);
+
+    const state = {
+      rawScrollProgress: 0,     // 実際のスクロール位置から算出した進捗 (0.0〜1.0)
+      targetProgress: 0,        // ロック判定後の目標進捗 (0.0〜1.0)
+      smoothProgress: 0,        // lerp補間された現在の進捗 (0.0〜1.0)
+      currentStep: 1,           // 現在のステップ番号 (1〜5)
+
+      hasTalkedToStaff: false,  // ステップ2: 店員と会話済みか
+      staffGreetingTimer: 0,    // 店員が手を振るアニメーション用タイマー
+      isOrderModalOpen: false,  // ステップ5: モーダル表示中か
+
+      // カメラ補間状態
+      cameraPos: new THREE.Vector3(0, 1.6, 3.6),
+      cameraTargetPos: new THREE.Vector3(0, 1.6, 3.6),
+      cameraLookAt: new THREE.Vector3(0, 1.5, 0),
+      cameraTargetLookAt: new THREE.Vector3(0, 1.5, 0),
+
+      // ステップ4の見渡し角度（慣性補間用）
+      targetLookYaw: 0,
+      targetLookPitch: 0,
+      currentLookYaw: 0,
+      currentLookPitch: 0,
+
+      // ポインター操作状態
+      isPointerDown: false,
+      pointerDownPos: new THREE.Vector2(),
+      lastPointerPos: new THREE.Vector2(),
+      pointerDragDistance: 0
+    };
+
+    /* ==========================================================================
+       1. シーン・カメラ・レンダラー初期化
+       ========================================================================== */
+    const canvas = document.getElementById('webgl-canvas');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x16110d);
+    scene.fog = new THREE.FogExp2(0x1a130e, 0.032);
+
+    const camera = new THREE.PerspectiveCamera(
+      55,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      50
+    );
+    camera.position.copy(state.cameraPos);
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      powerPreference: 'high-performance'
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+
+    /* ==========================================================================
+       2. 3Dモデル(.glb)置換用アンカー構造 (SCENE_ANCHORS)
+          後から外部GLBモデルをロードして特定オブジェクトを差し替えやすいよう、
+          ゾーン・役割ごとに明確な THREE.Group アンカーを定義しています。
+       ========================================================================== */
+    const SCENE_ANCHORS = {
+      root: new THREE.Group(),
+      entrance: new THREE.Group(),    // Z ≈ 2〜0: 店外・ドア枠・外壁
+      doorHinge: new THREE.Group(),   // Z = 0, X = -0.62: 開閉する木製ドアの蝶番支点
+      welcomeMat: new THREE.Group(),  // Z = 1.1: ウェルカムマット
+      hallway: new THREE.Group(),     // Z ≈ 0〜-8: 店内通路・床・間接照明
+      counter: new THREE.Group(),     // Z ≈ -5.6: レジカウンター・コーヒーマシン
+      staff: new THREE.Group(),       // Z = -5.3, X = -1.25: 店員キャラクター（Raycaster対象）
+      seatingZone: new THREE.Group(), // Z ≈ -10〜-16: 客席ゾーン・窓・ペンダントライト
+      mainTable: new THREE.Group(),   // Z = -14.0, X = 0: 着席するメインテーブル＆椅子
+      orderDevice: new THREE.Group()  // Z = -13.72, Y = 0.74: 卓上オーダー端末（Raycaster対象）
+    };
+
+    scene.add(SCENE_ANCHORS.root);
+    Object.entries(SCENE_ANCHORS).forEach(([key, group]) => {
+      group.name = `Anchor_${key}`;
+      if (key !== 'root') SCENE_ANCHORS.root.add(group);
+    });
+
+    /**
+     * 【拡張用ユーティリティ】指定したアンカーグループの中身を外部 .glb モデルに置換する関数
+     * 例: loadGLBIntoAnchor('staff', './models/barista.glb', { scale: 1.0 });
+     */
+    const gltfLoader = new GLTFLoader();
+    export async function loadGLBIntoAnchor(anchorKey, glbUrl, options = {}) {
+      const targetAnchor = SCENE_ANCHORS[anchorKey];
+      if (!targetAnchor) {
+        console.warn(`指定されたアンカー "${anchorKey}" が見つかりません。`);
+        return null;
+      }
+      return new Promise((resolve, reject) => {
+        gltfLoader.load(
+          glbUrl,
+          (gltf) => {
+            // 既存のプロシージャルメッシュを破棄・クリア
+            while (targetAnchor.children.length > 0) {
+              const child = targetAnchor.children[0];
+              targetAnchor.remove(child);
+            }
+            const model = gltf.scene;
+            if (options.scale) model.scale.setScalar(options.scale);
+            if (options.position) model.position.copy(options.position);
+            if (options.rotationY) model.rotation.y = options.rotationY;
+            model.traverse((node) => {
+              if (node.isMesh) {
+                node.castShadow = true;
+                node.receiveShadow = true;
+              }
+            });
+            targetAnchor.add(model);
+            resolve(model);
+          },
+          undefined,
+          (err) => reject(err)
+        );
+      });
+    }
+
+    /* ==========================================================================
+       3. プロシージャルテクスチャ生成（外部画像不要で温かみのある質感を表現）
+       ========================================================================== */
+    function createWoodPlankTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512;
+      c.height = 512;
+      const ctx = c.getContext('2d');
+
+      ctx.fillStyle = '#7c5335';
+      ctx.fillRect(0, 0, 512, 512);
+
+      const planks = 8;
+      const plankW = 512 / planks;
+      for (let i = 0; i < planks; i++) {
+        const shade = (i % 2 === 0 ? 6 : -6) + (Math.sin(i * 2.3) * 8);
+        ctx.fillStyle = `rgb(${124 + shade}, ${83 + shade * 0.7}, ${53 + shade * 0.5})`;
+        ctx.fillRect(i * plankW, 0, plankW - 2, 512);
+
+        // 木目ライン
+        ctx.strokeStyle = 'rgba(55, 32, 16, 0.16)';
+        ctx.lineWidth = 2;
+        for (let g = 0; g < 12; g++) {
+          ctx.beginPath();
+          const gx = i * plankW + (g / 12) * plankW;
+          ctx.moveTo(gx, 0);
+          ctx.bezierCurveTo(gx + 4, 170, gx - 4, 340, gx, 512);
+          ctx.stroke();
+        }
+
+        // 板の継ぎ目
+        const jointY = ((i * 173) % 420) + 40;
+        ctx.fillStyle = 'rgba(35, 20, 10, 0.45)';
+        ctx.fillRect(i * plankW, jointY, plankW, 2);
+      }
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(4, 14);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    function createWelcomeMatTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512;
+      c.height = 256;
+      const ctx = c.getContext('2d');
+
+      ctx.fillStyle = '#5c4028';
+      ctx.fillRect(0, 0, 512, 256);
+
+      ctx.strokeStyle = '#d4b48c';
+      ctx.lineWidth = 8;
+      ctx.strokeRect(18, 18, 476, 220);
+
+      ctx.fillStyle = '#f5e8d3';
+      ctx.font = 'bold 44px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('WELCOME', 256, 112);
+
+      ctx.font = '600 22px sans-serif';
+      ctx.fillStyle = '#e2c799';
+      ctx.fillText('LUMIÈRE CAFÉ', 256, 168);
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    function createMenuBoardTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512;
+      c.height = 256;
+      const ctx = c.getContext('2d');
+
+      ctx.fillStyle = '#1b2420';
+      ctx.fillRect(0, 0, 512, 256);
+
+      ctx.strokeStyle = '#8c6239';
+      ctx.lineWidth = 14;
+      ctx.strokeRect(7, 7, 498, 242);
+
+      ctx.fillStyle = '#fef3c7';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('☕ LUMIÈRE SPECIALTY COFFEE', 256, 52);
+
+      ctx.font = '20px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#e5e7eb';
+      ctx.fillText('• Honey Cafe Latte ............ ¥580', 56, 105);
+      ctx.fillText('• Butter Croissant ............ ¥420', 56, 145);
+      ctx.fillText('• Basque Cheesecake ....... ¥650', 56, 185);
+
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('★ MOBILE ORDER AT YOUR TABLE ★', 256, 224);
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    function createOrderScreenTexture() {
+      const c = document.createElement('canvas');
+      c.width = 256;
+      c.height = 384;
+      const ctx = c.getContext('2d');
+
+      const grad = ctx.createLinearGradient(0, 0, 0, 384);
+      grad.addColorStop(0, '#291d15');
+      grad.addColorStop(1, '#140e0a');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 256, 384);
+
+      // ヘッダーバッジ
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.roundRect(28, 26, 200, 38, 19);
+      ctx.fill();
+
+      ctx.fillStyle = '#1c1208';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('TAP TO ORDER', 128, 51);
+
+      // カフェアイコンとQR風デザイン
+      ctx.fillStyle = '#fff8ee';
+      ctx.beginPath();
+      ctx.roundRect(48, 86, 160, 160, 20);
+      ctx.fill();
+
+      ctx.fillStyle = '#1f1610';
+      // 簡易QRパターン描画
+      const cell = 16;
+      for (let r = 0; r < 7; r++) {
+        for (let col = 0; col < 7; col++) {
+          if ((r + col) % 2 === 0 || (r < 2 && col < 2) || (r < 2 && col > 4) || (r > 4 && col < 2)) {
+            ctx.fillRect(68 + col * cell, 106 + r * cell, cell - 2, cell - 2);
+          }
+        }
+      }
+
+      ctx.fillStyle = '#fde68a';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillText('席からカンタン注文', 128, 290);
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.roundRect(36, 314, 184, 44, 22);
+      ctx.fill();
+
+      ctx.fillStyle = '#181009';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText('注文する ＞', 128, 343);
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    /* ==========================================================================
+       4. 共通PBRマテリアル定義
+       ========================================================================== */
+    const materials = {
+      floorWood: new THREE.MeshStandardMaterial({
+        map: createWoodPlankTexture(),
+        roughness: 0.65,
+        metalness: 0.05
+      }),
+      wallInterior: new THREE.MeshStandardMaterial({
+        color: 0xf4eadc,
+        roughness: 0.88,
+        metalness: 0.02
+      }),
+      wallExterior: new THREE.MeshStandardMaterial({
+        color: 0xd9c7b2,
+        roughness: 0.9,
+        metalness: 0.02
+      }),
+      darkWood: new THREE.MeshStandardMaterial({
+        color: 0x4a2f1d,
+        roughness: 0.55,
+        metalness: 0.08
+      }),
+      warmWood: new THREE.MeshStandardMaterial({
+        color: 0x8c5834,
+        roughness: 0.5,
+        metalness: 0.06
+      }),
+      lightWood: new THREE.MeshStandardMaterial({
+        color: 0xb88456,
+        roughness: 0.48,
+        metalness: 0.05
+      }),
+      brass: new THREE.MeshStandardMaterial({
+        color: 0xd4af37,
+        roughness: 0.25,
+        metalness: 0.85
+      }),
+      blackIron: new THREE.MeshStandardMaterial({
+        color: 0x22201e,
+        roughness: 0.45,
+        metalness: 0.75
+      }),
+      glass: new THREE.MeshStandardMaterial({
+        color: 0xdbeafe,
+        transparent: true,
+        opacity: 0.32,
+        roughness: 0.1,
+        metalness: 0.2
+      }),
+      warmBulb: new THREE.MeshStandardMaterial({
+        color: 0xfff3d1,
+        emissive: 0xffb347,
+        emissiveIntensity: 2.2,
+        roughness: 0.2
+      }),
+      foliage: new THREE.MeshStandardMaterial({
+        color: 0x3f6b3e,
+        roughness: 0.75,
+        metalness: 0.02
+      }),
+      terracotta: new THREE.MeshStandardMaterial({
+        color: 0xb35c37,
+        roughness: 0.7
+      })
+    };
+
+    /* ==========================================================================
+       5. 空間プロシージャル構築
+          - 店外〜エントランス (Z ≈ 2〜0)
+          - 店内通路〜レジ (Z ≈ 0〜-8)
+          - 客席ゾーン (Z ≈ -10〜-16)
+          - 卓上オーダー端末 (Z ≈ -14, テーブル中央)
+       ========================================================================== */
+    // Raycaster判定用の配列
+    const staffInteractMeshes = [];
+    const deviceInteractMeshes = [];
+
+    // アニメーション制御用の参照
+    let doorPivotGroup = null;
+    let staffCharacterRefs = null;
+    let orderDeviceRefs = null;
+    let interiorLights = [];
+
+    function buildCafeEnvironment() {
+      buildLighting();
+      buildEntranceZone();
+      buildHallwayAndCounterZone();
+      buildStaffCharacter();
+      buildSeatingZone();
+      buildOrderTerminal();
+    }
+
+    /* --------------------------------------------------------------------------
+       5-1. ライティング構築
+       -------------------------------------------------------------------------- */
+    function buildLighting() {
+      const hemiLight = new THREE.HemisphereLight(0xffe8cc, 0x3d2b1f, 0.75);
+      scene.add(hemiLight);
+
+      // 店外エントランスライト
+      const entranceLight = new THREE.PointLight(0xffc57a, 2.2, 8, 1.5);
+      entranceLight.position.set(0, 2.55, 1.4);
+      scene.add(entranceLight);
+
+      // 店内間接照明（カウンター付近 Z = -2.5, -5.5）
+      const hallLight1 = new THREE.PointLight(0xffbe73, 2.8, 10, 1.4);
+      hallLight1.position.set(0, 2.9, -2.5);
+      hallLight1.castShadow = true;
+      hallLight1.shadow.mapSize.set(1024, 1024);
+      hallLight1.shadow.bias = -0.001;
+      scene.add(hallLight1);
+      interiorLights.push(hallLight1);
+
+      const counterLight = new THREE.PointLight(0xffb866, 3.2, 11, 1.4);
+      counterLight.position.set(-0.8, 2.85, -5.5);
+      counterLight.castShadow = true;
+      scene.add(counterLight);
+      interiorLights.push(counterLight);
+
+      // 客席ゾーン照明（Z = -10.5, -14.0）
+      const seatZoneLight = new THREE.PointLight(0xffc988, 2.8, 11, 1.4);
+      seatZoneLight.position.set(0, 2.85, -10.5);
+      scene.add(seatZoneLight);
+      interiorLights.push(seatZoneLight);
+
+      // メインテーブル直上のペンダントライト光源
+      const mainTableLight = new THREE.PointLight(0xffd194, 3.5, 9, 1.3);
+      mainTableLight.position.set(0, 2.05, -14.0);
+      mainTableLight.castShadow = true;
+      scene.add(mainTableLight);
+      interiorLights.push(mainTableLight);
+
+      // 窓からの柔らかい自然光
+      const windowSunLight = new THREE.DirectionalLight(0xfff1d6, 1.35);
+      windowSunLight.position.set(7.5, 5.5, -12.5);
+      windowSunLight.target.position.set(0, 0.5, -13.5);
+      scene.add(windowSunLight);
+      scene.add(windowSunLight.target);
+    }
+
+    /* --------------------------------------------------------------------------
+       5-2. 店外〜エントランス (Z ≈ 2〜0)
+       -------------------------------------------------------------------------- */
+    function buildEntranceZone() {
+      const group = SCENE_ANCHORS.entrance;
+
+      // 店外石畳アプローチ床 (Z = 0 〜 4.5)
+      const porchGeo = new THREE.BoxGeometry(8, 0.1, 4.6);
+      const porchMat = new THREE.MeshStandardMaterial({ color: 0x3b332d, roughness: 0.85 });
+      const porch = new THREE.Mesh(porchGeo, porchMat);
+      porch.position.set(0, -0.05, 2.3);
+      porch.receiveShadow = true;
+      group.add(porch);
+
+      // ウェルカムマット (Z = 1.15)
+      const matMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1.35, 0.022, 0.72),
+        new THREE.MeshStandardMaterial({ map: createWelcomeMatTexture(), roughness: 0.92 })
+      );
+      matMesh.receiveShadow = true;
+      SCENE_ANCHORS.welcomeMat.position.set(0, 0.011, 1.15);
+      SCENE_ANCHORS.welcomeMat.add(matMesh);
+
+      // 外壁（ドア開口部を空けて左右と上部に配置, Z = 0）
+      const leftWall = new THREE.Mesh(new THREE.BoxGeometry(2.9, 3.4, 0.24), materials.wallExterior);
+      leftWall.position.set(-2.1, 1.7, 0);
+      leftWall.castShadow = true;
+      leftWall.receiveShadow = true;
+      group.add(leftWall);
+
+      const rightWall = new THREE.Mesh(new THREE.BoxGeometry(2.9, 3.4, 0.24), materials.wallExterior);
+      rightWall.position.set(2.1, 1.7, 0);
+      rightWall.castShadow = true;
+      rightWall.receiveShadow = true;
+      group.add(rightWall);
+
+      const topWall = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.0, 0.24), materials.wallExterior);
+      topWall.position.set(0, 2.9, 0);
+      group.add(topWall);
+
+      // 木製ドア枠 (Z = 0)
+      const frameLeft = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.45, 0.28), materials.darkWood);
+      frameLeft.position.set(-0.66, 1.225, 0);
+      group.add(frameLeft);
+
+      const frameRight = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.45, 0.28), materials.darkWood);
+      frameRight.position.set(0.66, 1.225, 0);
+      group.add(frameRight);
+
+      const frameTop = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.12, 0.28), materials.darkWood);
+      frameTop.position.set(0, 2.44, 0);
+      group.add(frameTop);
+
+      // カフェ看板＆オーニングテント (Z ≈ 0.45)
+      const awning = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.6, 0.6, 2.6, 16, 1, false, 0, Math.PI * 0.5),
+        new THREE.MeshStandardMaterial({ color: 0x7f2d1e, roughness: 0.7, side: THREE.DoubleSide })
+      );
+      awning.rotation.z = Math.PI * 0.5;
+      awning.rotation.x = -Math.PI * 0.5;
+      awning.position.set(0, 2.55, 0.12);
+      group.add(awning);
+
+      // 店外プランター観葉植物 (Z ≈ 0.85, 左右)
+      [-1.25, 1.25].forEach((xPos) => {
+        const pot = createPlantObject(0.28, 0.85);
+        pot.position.set(xPos, 0, 0.72);
+        group.add(pot);
+      });
+
+      // 開閉可能な木製ドア（蝶番アンカー X = -0.60, Z = 0）
+      SCENE_ANCHORS.doorHinge.position.set(-0.60, 0, 0);
+      doorPivotGroup = SCENE_ANCHORS.doorHinge;
+
+      // ドア本体（蝶番から右へ幅1.20m）
+      const doorWidth = 1.20;
+      const doorContainer = new THREE.Group();
+      doorContainer.position.set(doorWidth * 0.5, 0, 0);
+      doorPivotGroup.add(doorContainer);
+
+      // ドア下部パネル
+      const doorBottom = new THREE.Mesh(new THREE.BoxGeometry(doorWidth, 1.05, 0.07), materials.warmWood);
+      doorBottom.position.set(0, 0.525, 0);
+      doorBottom.castShadow = true;
+      doorContainer.add(doorBottom);
+
+      // ドア上部枠（ガラス窓を囲むフレーム）
+      const stileLeft = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.32, 0.07), materials.warmWood);
+      stileLeft.position.set(-doorWidth * 0.5 + 0.08, 1.71, 0);
+      doorContainer.add(stileLeft);
+
+      const stileRight = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.32, 0.07), materials.warmWood);
+      stileRight.position.set(doorWidth * 0.5 - 0.08, 1.71, 0);
+      doorContainer.add(stileRight);
+
+      const railTop = new THREE.Mesh(new THREE.BoxGeometry(doorWidth, 0.16, 0.07), materials.warmWood);
+      railTop.position.set(0, 2.30, 0);
+      doorContainer.add(railTop);
+
+      // ドアガラス窓
+      const doorGlass = new THREE.Mesh(new THREE.BoxGeometry(0.88, 1.16, 0.02), materials.glass);
+      doorGlass.position.set(0, 1.66, 0);
+      doorContainer.add(doorGlass);
+
+      // 真鍮ドアハンドル（表裏）
+      const handleGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.28, 12);
+      const handleFront = new THREE.Mesh(handleGeo, materials.brass);
+      handleFront.position.set(0.44, 1.08, 0.065);
+      doorContainer.add(handleFront);
+
+      const handleBack = new THREE.Mesh(handleGeo, materials.brass);
+      handleBack.position.set(0.44, 1.08, -0.065);
+      doorContainer.add(handleBack);
+    }
+
+    /* --------------------------------------------------------------------------
+       5-3. 店内通路〜レジ (Z ≈ 0〜-8)
+       -------------------------------------------------------------------------- */
+    function buildHallwayAndCounterZone() {
+      const group = SCENE_ANCHORS.hallway;
+
+      // 店内全体のフローリング床 (Z = 0 〜 -17.5)
+      const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.1, 17.6), materials.floorWood);
+      floorMesh.position.set(0, -0.05, -8.8);
+      floorMesh.receiveShadow = true;
+      group.add(floorMesh);
+
+      // 天井とウッドルーバー梁 (Z = 0 〜 -17.5)
+      const ceiling = new THREE.Mesh(
+        new THREE.BoxGeometry(7.2, 0.15, 17.6),
+        new THREE.MeshStandardMaterial({ color: 0x2b1e16, roughness: 0.85 })
+      );
+      ceiling.position.set(0, 3.35, -8.8);
+      group.add(ceiling);
+
+      for (let z = -1.2; z >= -16.5; z -= 1.6) {
+        const beam = new THREE.Mesh(new THREE.BoxGeometry(7.0, 0.14, 0.16), materials.darkWood);
+        beam.position.set(0, 3.22, z);
+        group.add(beam);
+      }
+
+      // 左右の店内壁 (Z = 0 〜 -17.5)
+      const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.4, 17.6), materials.wallInterior);
+      wallL.position.set(-3.5, 1.7, -8.8);
+      wallL.receiveShadow = true;
+      group.add(wallL);
+
+      const wallR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.4, 17.6), materials.wallInterior);
+      wallR.position.set(3.5, 1.7, -8.8);
+      wallR.receiveShadow = true;
+      group.add(wallR);
+
+      // 最奥の壁 (Z = -17.5)
+      const wallBack = new THREE.Mesh(new THREE.BoxGeometry(7.2, 3.4, 0.2), materials.wallInterior);
+      wallBack.position.set(0, 1.7, -17.5);
+      wallBack.receiveShadow = true;
+      group.add(wallBack);
+
+      // 巾木（ベースボード）
+      [-3.38, 3.38].forEach((x) => {
+        const baseboard = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 17.5), materials.darkWood);
+        baseboard.position.set(x, 0.07, -8.8);
+        group.add(baseboard);
+      });
+
+      // 壁面間接照明ブラケット＆アートフレーム（通路右側 X = 3.38, Z = -2.5, -5.5, -8.2）
+      [-2.4, -5.4, -8.2].forEach((zPos, idx) => {
+        const sconce = new THREE.Group();
+        sconce.position.set(3.35, 2.05, zPos);
+        const sconceBase = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.26, 0.18), materials.blackIron);
+        const sconceBulb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), materials.warmBulb);
+        sconceBulb.position.set(-0.06, 0, 0);
+        sconce.add(sconceBase, sconceBulb);
+        group.add(sconce);
+
+        // 壁面カフェアートパネル
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.75, 0.58), materials.darkWood);
+        frame.position.set(3.37, 1.42, zPos);
+        const artColors = [0xd97706, 0x059669, 0xb45309];
+        const canvasArt = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, 0.62, 0.46),
+          new THREE.MeshStandardMaterial({ color: artColors[idx % artColors.length], roughness: 0.7 })
+        );
+        canvasArt.position.set(3.36, 1.42, zPos);
+        group.add(frame, canvasArt);
+      });
+
+      // 温かみのあるレジカウンター（Z ≈ -5.6, X = -1.65）
+      const counterGroup = SCENE_ANCHORS.counter;
+      counterGroup.position.set(-1.65, 0, -5.6);
+
+      // カウンター本体
+      const counterBody = new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.02, 1.15), materials.warmWood);
+      counterBody.position.set(0, 0.51, 0);
+      counterBody.castShadow = true;
+      counterBody.receiveShadow = true;
+      counterGroup.add(counterBody);
+
+      // カウンター前面の縦ルーバー装飾
+      for (let i = -9; i <= 9; i++) {
+        const slat = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.96, 0.03), materials.lightWood);
+        slat.position.set(i * 0.11, 0.50, 0.58);
+        counterGroup.add(slat);
+      }
+
+      // カウンター天板
+      const counterTop = new THREE.Mesh(new THREE.BoxGeometry(2.42, 0.07, 1.26), materials.darkWood);
+      counterTop.position.set(0, 1.055, 0);
+      counterTop.castShadow = true;
+      counterTop.receiveShadow = true;
+      counterGroup.add(counterTop);
+
+      // エスプレッソマシン
+      const espressoMachine = new THREE.Mesh(
+        new THREE.BoxGeometry(0.55, 0.44, 0.42),
+        new THREE.MeshStandardMaterial({ color: 0xd6d3d1, roughness: 0.25, metalness: 0.8 })
+      );
+      espressoMachine.position.set(-0.62, 1.31, -0.1);
+      espressoMachine.castShadow = true;
+      counterGroup.add(espressoMachine);
+
+      // ペストリーガラスショーケース
+      const showcase = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.42, 0.46), materials.glass);
+      showcase.position.set(0.68, 1.30, 0.12);
+      counterGroup.add(showcase);
+
+      // 背面の黒板メニューボード
+      const menuBoard = new THREE.Mesh(
+        new THREE.BoxGeometry(2.1, 1.05, 0.06),
+        new THREE.MeshStandardMaterial({ map: createMenuBoardTexture(), roughness: 0.8 })
+      );
+      menuBoard.position.set(-0.1, 2.15, -1.15);
+      counterGroup.add(menuBoard);
+    }
+
+    /* --------------------------------------------------------------------------
+       5-4. 店員キャラクター（ローポリ・円柱と球によるトイ風モデリング）
+       -------------------------------------------------------------------------- */
+    function buildStaffCharacter() {
+      const staffGroup = SCENE_ANCHORS.staff;
+      // カウンターのすぐ横〜前（カメラがZ=-3.4で停止した際に正面〜やや左に見える位置）
+      staffGroup.position.set(-1.15, 0, -5.25);
+      staffGroup.rotation.y = 0.28; // カメラ（通路側）を優しく向く角度
+
+      const bodyRoot = new THREE.Group();
+      staffGroup.add(bodyRoot);
+
+      // 胴体（シャツ＋カフェエプロン）
+      const torsoMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.7 });
+      const apronMat = new THREE.MeshStandardMaterial({ color: 0x3f6212, roughness: 0.75 });
+      const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdbb5, roughness: 0.6 });
+      const hairMat = new THREE.MeshStandardMaterial({ color: 0x3b2314, roughness: 0.65 });
+
+      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.24, 0.68, 20), torsoMat);
+      torso.position.set(0, 1.06, 0);
+      torso.castShadow = true;
+      bodyRoot.add(torso);
+
+      const apron = new THREE.Mesh(new THREE.CylinderGeometry(0.208, 0.248, 0.56, 20, 1, false, -Math.PI * 0.4, Math.PI * 0.8), apronMat);
+      apron.position.set(0, 1.02, 0);
+      bodyRoot.add(apron);
+
+      // 脚（円柱）
+      [-0.09, 0.09].forEach((x) => {
+        const leg = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.065, 0.055, 0.72, 14),
+          new THREE.MeshStandardMaterial({ color: 0x292524, roughness: 0.8 })
+        );
+        leg.position.set(x, 0.36, 0);
+        leg.castShadow = true;
+        bodyRoot.add(leg);
+      });
+
+      // 頭部（球）
+      const headGroup = new THREE.Group();
+      headGroup.position.set(0, 1.58, 0);
+      bodyRoot.add(headGroup);
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 24, 24), skinMat);
+      head.castShadow = true;
+      headGroup.add(head);
+
+      // 髪の毛＆カフェベレー帽
+      const hair = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 20, 20, 0, Math.PI * 2, 0, Math.PI * 0.55),
+        hairMat
+      );
+      hair.rotation.x = -0.25;
+      headGroup.add(hair);
+
+      const beret = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.22, 0.08, 20),
+        new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.7 })
+      );
+      beret.position.set(0, 0.19, -0.02);
+      beret.rotation.z = -0.12;
+      headGroup.add(beret);
+
+      // 目とほっぺた（トイ風の愛らしい表情）
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1c1917 });
+      [-0.072, 0.072].forEach((x) => {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.024, 12, 12), eyeMat);
+        eye.position.set(x, 0.02, 0.195);
+        headGroup.add(eye);
+
+        const cheek = new THREE.Mesh(
+          new THREE.SphereGeometry(0.028, 10, 10),
+          new THREE.MeshBasicMaterial({ color: 0xfda4af })
+        );
+        cheek.scale.set(1.2, 0.7, 0.4);
+        cheek.position.set(x * 1.45, -0.035, 0.185);
+        headGroup.add(cheek);
+      });
+
+      // 笑顔の口元（トーラス弧）
+      const smile = new THREE.Mesh(
+        new THREE.TorusGeometry(0.04, 0.008, 8, 16, Math.PI),
+        eyeMat
+      );
+      smile.rotation.x = Math.PI;
+      smile.position.set(0, -0.035, 0.198);
+      headGroup.add(smile);
+
+      // 左腕・右腕（挨拶で手を振れるようピボット化）
+      const leftArmPivot = new THREE.Group();
+      leftArmPivot.position.set(-0.24, 1.32, 0);
+      bodyRoot.add(leftArmPivot);
+      const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.42, 12), torsoMat);
+      leftArm.position.set(-0.04, -0.18, 0);
+      leftArm.rotation.z = 0.2;
+      leftArmPivot.add(leftArm);
+
+      const rightArmPivot = new THREE.Group();
+      rightArmPivot.position.set(0.24, 1.32, 0);
+      bodyRoot.add(rightArmPivot);
+      const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.42, 12), torsoMat);
+      rightArm.position.set(0.08, -0.16, 0.05);
+      rightArm.rotation.z = -0.35;
+      rightArmPivot.add(rightArm);
+
+      const rightHand = new THREE.Mesh(new THREE.SphereGeometry(0.052, 12, 12), skinMat);
+      rightHand.position.set(0.14, -0.36, 0.08);
+      rightArmPivot.add(rightHand);
+
+      // タップしやすさを高める透明ヒットボックス（Raycaster用）
+      const hitBox = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.48, 0.48, 1.95, 12),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      hitBox.position.set(0, 0.98, 0);
+      staffGroup.add(hitBox);
+      staffInteractMeshes.push(hitBox);
+
+      // 店員のすべての子メッシュもRaycaster対象に追加
+      staffGroup.traverse((child) => {
+        if (child.isMesh) {
+          child.userData.interactType = 'staff';
+          staffInteractMeshes.push(child);
+        }
+      });
+
+      staffCharacterRefs = {
+        bodyRoot,
+        headGroup,
+        rightArmPivot
+      };
+    }
+
+    /* --------------------------------------------------------------------------
+       5-5. 客席ゾーン (Z ≈ -10〜-16)
+       -------------------------------------------------------------------------- */
+    function buildSeatingZone() {
+      const group = SCENE_ANCHORS.seatingZone;
+
+      // 大きなカフェ窓（右壁 X = 3.38, Z = -11.2, -14.2）
+      [-11.2, -14.2].forEach((zPos) => {
+        const winFrame = new THREE.Group();
+        winFrame.position.set(3.38, 1.65, zPos);
+
+        const glassPane = new THREE.Mesh(
+          new THREE.BoxGeometry(0.04, 1.75, 2.1),
+          new THREE.MeshStandardMaterial({
+            color: 0xfff3d6,
+            emissive: 0xffe4b5,
+            emissiveIntensity: 0.55,
+            roughness: 0.15
+          })
+        );
+        winFrame.add(glassPane);
+
+        // 窓枠格子
+        const borderTop = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 2.2), materials.darkWood);
+        borderTop.position.y = 0.88;
+        const borderBottom = borderTop.clone();
+        borderBottom.position.y = -0.88;
+        const mullionV = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.75, 0.06), materials.darkWood);
+        const mullionH = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 2.1), materials.darkWood);
+
+        winFrame.add(borderTop, borderBottom, mullionV, mullionH);
+        group.add(winFrame);
+      });
+
+      // メインテーブル（着席するテーブル Z = -14.0, X = 0）
+      const mainTableGroup = SCENE_ANCHORS.mainTable;
+      mainTableGroup.position.set(0, 0, -14.0);
+
+      // 木製カフェテーブル天板 (高さ Y = 0.74)
+      const tableTop = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.68, 0.68, 0.045, 32),
+        materials.warmWood
+      );
+      tableTop.position.set(0, 0.72, 0);
+      tableTop.castShadow = true;
+      tableTop.receiveShadow = true;
+      mainTableGroup.add(tableTop);
+
+      // テーブル脚とベース
+      const tablePole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.68, 16), materials.blackIron);
+      tablePole.position.set(0, 0.35, 0);
+      tablePole.castShadow = true;
+      const tableBase = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.36, 0.03, 24), materials.blackIron);
+      tableBase.position.set(0, 0.015, 0);
+      tableBase.receiveShadow = true;
+      mainTableGroup.add(tablePole, tableBase);
+
+      // テーブル上の小さな一輪挿し（テーブル左奥）
+      const vaseGroup = new THREE.Group();
+      vaseGroup.position.set(-0.26, 0.745, -0.18);
+      const vase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.032, 0.048, 0.14, 14),
+        new THREE.MeshStandardMaterial({ color: 0xe7e5e4, roughness: 0.3 })
+      );
+      vase.position.y = 0.07;
+      const flower = new THREE.Mesh(new THREE.SphereGeometry(0.042, 12, 12), materials.foliage);
+      flower.position.y = 0.16;
+      vaseGroup.add(vase, flower);
+      mainTableGroup.add(vaseGroup);
+
+      // 椅子（向かい側 Z = -14.95、左右 X = ±0.92）
+      const oppositeChair = createCafeChair();
+      oppositeChair.position.set(0, 0, -0.95);
+      mainTableGroup.add(oppositeChair);
+
+      const leftChair = createCafeChair();
+      leftChair.position.set(-0.92, 0, 0);
+      leftChair.rotation.y = Math.PI * 0.5;
+      mainTableGroup.add(leftChair);
+
+      const rightChair = createCafeChair();
+      rightChair.position.set(0.92, 0, 0);
+      rightChair.rotation.y = -Math.PI * 0.5;
+      mainTableGroup.add(rightChair);
+
+      // 周囲のサブテーブル＆チェア（ステップ4で見渡した時に豊かな空間に見えるよう配置）
+      const sideTablePositions = [
+        { x: -2.15, z: -11.2 },
+        { x: 2.15, z: -11.2 },
+        { x: -2.15, z: -14.6 }
+      ];
+      sideTablePositions.forEach(({ x, z }) => {
+        const subTable = new THREE.Group();
+        subTable.position.set(x, 0, z);
+
+        const top = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.04, 0.85), materials.lightWood);
+        top.position.y = 0.72;
+        top.castShadow = true;
+        top.receiveShadow = true;
+
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.7, 12), materials.blackIron);
+        leg.position.y = 0.35;
+        const base = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.025, 0.42), materials.blackIron);
+        base.position.y = 0.012;
+
+        const c1 = createCafeChair();
+        c1.position.set(0, 0, -0.72);
+        const c2 = createCafeChair();
+        c2.position.set(0, 0, 0.72);
+        c2.rotation.y = Math.PI;
+
+        subTable.add(top, leg, base, c1, c2);
+        group.add(subTable);
+      });
+
+      // ペンダントライト（メインテーブル直上＆サブテーブル上）
+      const pendantCoords = [
+        { x: 0, z: -14.0, y: 2.15 },
+        { x: -2.15, z: -11.2, y: 2.35 },
+        { x: 2.15, z: -11.2, y: 2.35 }
+      ];
+      pendantCoords.forEach(({ x, y, z }) => {
+        const pendant = createPendantLight(3.3 - y);
+        pendant.position.set(x, y, z);
+        group.add(pendant);
+      });
+
+      // 客席奥の観葉植物とブックシェルフ（見渡し時のアクセント）
+      const cornerPlantL = createPlantObject(0.34, 1.35);
+      cornerPlantL.position.set(-2.9, 0, -16.6);
+      group.add(cornerPlantL);
+
+      const cornerPlantR = createPlantObject(0.34, 1.25);
+      cornerPlantR.position.set(2.8, 0, -16.6);
+      group.add(cornerPlantR);
+
+      // 奥壁のウッドシェルフ (Z = -17.2)
+      const shelfGroup = new THREE.Group();
+      shelfGroup.position.set(0, 0, -17.15);
+      for (let h = 0.9; h <= 2.3; h += 0.65) {
+        const board = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.05, 0.32), materials.warmWood);
+        board.position.set(0, h, 0);
+        board.castShadow = true;
+        shelfGroup.add(board);
+      }
+      group.add(shelfGroup);
+    }
+
+    /* --------------------------------------------------------------------------
+       5-6. 卓上オーダー端末 (Z ≈ -14, テーブル中央)
+       -------------------------------------------------------------------------- */
+    function buildOrderTerminal() {
+      const deviceGroup = SCENE_ANCHORS.orderDevice;
+      // メインテーブル（Z = -14.0）の中央やや手前、着席カメラ（Z ≈ -12.85）から見やすく押しやすい位置
+      deviceGroup.position.set(0, 0.743, -13.76);
+
+      const visualRoot = new THREE.Group();
+      deviceGroup.add(visualRoot);
+
+      // 木製・真鍮コンビのスタンド台座
+      const standBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.11, 0.13, 0.024, 24),
+        materials.darkWood
+      );
+      standBase.position.y = 0.012;
+      standBase.castShadow = true;
+      visualRoot.add(standBase);
+
+      // パルス発光リング（テーブル面で優しく脈動するガイドリング）
+      const pulseRingMat = new THREE.MeshBasicMaterial({
+        color: 0xfbbf24,
+        transparent: true,
+        opacity: 0.65,
+        side: THREE.DoubleSide
+      });
+      const pulseRing = new THREE.Mesh(new THREE.RingGeometry(0.135, 0.175, 32), pulseRingMat);
+      pulseRing.rotation.x = -Math.PI * 0.5;
+      pulseRing.position.y = 0.004;
+      visualRoot.add(pulseRing);
+
+      // スタンド支柱
+      const standNeck = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.12, 0.03), materials.brass);
+      standNeck.position.set(0, 0.07, -0.02);
+      standNeck.rotation.x = -0.28;
+      visualRoot.add(standNeck);
+
+      // スマートフォン/卓上QRタブレット筐体（手前側に傾けて配置）
+      const tabletHolder = new THREE.Group();
+      tabletHolder.position.set(0, 0.155, 0.01);
+      tabletHolder.rotation.x = -0.32; // 着席したユーザーの目線に正対する傾斜角
+      visualRoot.add(tabletHolder);
+
+      const bodyMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.17, 0.25, 0.016),
+        materials.blackIron
+      );
+      bodyMesh.castShadow = true;
+      tabletHolder.add(bodyMesh);
+
+      // 発光スクリーン面
+      const screenMat = new THREE.MeshStandardMaterial({
+        map: createOrderScreenTexture(),
+        emissive: new THREE.Color(0xf59e0b),
+        emissiveIntensity: 0.35,
+        roughness: 0.2,
+        metalness: 0.1
+      });
+      const screenMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.152, 0.228), screenMat);
+      screenMesh.position.z = 0.009;
+      tabletHolder.add(screenMesh);
+
+      // 端末専用の微小ポイントライト
+      const deviceGlowLight = new THREE.PointLight(0xffb74d, 0.6, 1.5, 2.0);
+      deviceGlowLight.position.set(0, 0.22, 0.14);
+      deviceGroup.add(deviceGlowLight);
+
+      // タップ判定を快適にする透明ヒットボックス（Raycaster用）
+      const deviceHitBox = new THREE.Mesh(
+        new THREE.SphereGeometry(0.24, 12, 12),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      deviceHitBox.position.set(0, 0.15, 0);
+      deviceGroup.add(deviceHitBox);
+      deviceInteractMeshes.push(deviceHitBox);
+
+      deviceGroup.traverse((child) => {
+        if (child.isMesh) {
+          child.userData.interactType = 'orderDevice';
+          deviceInteractMeshes.push(child);
+        }
+      });
+
+      orderDeviceRefs = {
+        visualRoot,
+        screenMat,
+        pulseRing,
+        pulseRingMat,
+        deviceGlowLight
+      };
+    }
+
+    /* --------------------------------------------------------------------------
+       5-7. 家具・装飾ヘルパー関数（椅子・ペンダントライト・観葉植物）
+       -------------------------------------------------------------------------- */
+    function createCafeChair() {
+      const chair = new THREE.Group();
+
+      // 座面
+      const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.04, 20), materials.lightWood);
+      seat.position.y = 0.44;
+      seat.castShadow = true;
+      chair.add(seat);
+
+      // 背もたれ
+      const backRest = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.035), materials.warmWood);
+      backRest.position.set(0, 0.72, -0.20);
+      backRest.castShadow = true;
+      chair.add(backRest);
+
+      // 4本の脚
+      const legCoords = [
+        [-0.15, -0.15],
+        [0.15, -0.15],
+        [-0.15, 0.15],
+        [0.15, 0.15]
+      ];
+      legCoords.forEach(([lx, lz]) => {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.014, 0.44, 10), materials.blackIron);
+        leg.position.set(lx, 0.22, lz);
+        chair.add(leg);
+      });
+
+      return chair;
+    }
+
+    function createPendantLight(cordLength = 1.0) {
+      const group = new THREE.Group();
+
+      const cord = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.008, 0.008, cordLength, 8),
+        materials.blackIron
+      );
+      cord.position.y = cordLength * 0.5;
+      group.add(cord);
+
+      const shade = new THREE.Mesh(
+        new THREE.ConeGeometry(0.22, 0.18, 24, 1, true),
+        new THREE.MeshStandardMaterial({
+          color: 0x3b281e,
+          roughness: 0.4,
+          metalness: 0.5,
+          side: THREE.DoubleSide
+        })
+      );
+      shade.position.y = 0.06;
+      group.add(shade);
+
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 16), materials.warmBulb);
+      bulb.position.y = 0.0;
+      group.add(bulb);
+
+      return group;
+    }
+
+    function createPlantObject(radius = 0.3, height = 1.0) {
+      const group = new THREE.Group();
+
+      const pot = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius * 0.85, radius * 0.65, height * 0.38, 18),
+        materials.terracotta
+      );
+      pot.position.y = height * 0.19;
+      pot.castShadow = true;
+      group.add(pot);
+
+      // 葉の房を複数の球体でローポリ表現
+      const leafOffsets = [
+        { x: 0, y: height * 0.65, z: 0, s: radius * 1.15 },
+        { x: -radius * 0.45, y: height * 0.52, z: radius * 0.25, s: radius * 0.8 },
+        { x: radius * 0.45, y: height * 0.56, z: -radius * 0.2, s: radius * 0.85 },
+        { x: 0, y: height * 0.88, z: 0, s: radius * 0.75 }
+      ];
+      leafOffsets.forEach(({ x, y, z, s }) => {
+        const leaf = new THREE.Mesh(new THREE.SphereGeometry(s, 14, 14), materials.foliage);
+        leaf.position.set(x, y, z);
+        leaf.castShadow = true;
+        group.add(leaf);
+      });
+
+      return group;
+    }
+
+    // 3D空間を構築実行
+    buildCafeEnvironment();
+
+    /* ==========================================================================
+       6. カメラパス計算 & 5ステップのストーリー進行ロジック
+       ========================================================================== */
+    function getStepFromProgress(p) {
+      if (p < STEP_RANGES.STEP1_END) return 1;
+      if (p < STEP_RANGES.STEP2_END) return 2;
+      if (p < STEP_RANGES.STEP3_END) return 3;
+      if (p < STEP_RANGES.STEP4_END) return 4;
+      return 5;
+    }
+
+    /**
+     * 正規化進捗 p (0.0 〜 1.0) から目標カメラ座標・注視点・ギミック状態を算出
+     */
+    function evaluateStoryAtProgress(p, elapsedTime) {
+      const pos = new THREE.Vector3();
+      const look = new THREE.Vector3();
+
+      // ------------------------------------------------------------------------
+      // ステップ1: ドアをくぐる（進捗 0.00 〜 0.20）
+      // ------------------------------------------------------------------------
+      if (p <= STEP_RANGES.STEP1_END) {
+        const t = THREE.MathUtils.clamp(p / STEP_RANGES.STEP1_END, 0, 1);
+        // カメラが店外 (Z=3.5) からドア (Z=0) をくぐり店内入口 (Z=-1.2) へ前進
+        pos.set(0, 1.6, THREE.MathUtils.lerp(3.5, -1.2, t));
+        look.set(0, 1.52, THREE.MathUtils.lerp(-1.0, -5.2, t));
+      }
+      // ------------------------------------------------------------------------
+      // ステップ2: 店員との遭遇・会話（進捗 0.20 〜 0.40）
+      // ------------------------------------------------------------------------
+      else if (p <= STEP_RANGES.STEP2_END) {
+        const t = THREE.MathUtils.clamp((p - 0.20) / 0.20, 0, 1);
+        // 0.20〜0.30で店員の前 (Z=-3.35) まで進み停止、0.30〜0.40で会話後に通路へ動き出す
+        if (p <= STEP2_LOCK_PROGRESS) {
+          const approachT = THREE.MathUtils.smoothstep(p, 0.20, STEP2_LOCK_PROGRESS);
+          pos.set(
+            THREE.MathUtils.lerp(0, -0.15, approachT),
+            1.6,
+            THREE.MathUtils.lerp(-1.2, -3.35, approachT)
+          );
+          // 店員（X=-1.15, Y=1.45, Z=-5.25）の方を向く
+          look.set(
+            THREE.MathUtils.lerp(0, -1.05, approachT),
+            THREE.MathUtils.lerp(1.52, 1.45, approachT),
+            -5.25
+          );
+        } else {
+          const departT = THREE.MathUtils.smoothstep(p, STEP2_LOCK_PROGRESS, 0.40);
+          pos.set(
+            THREE.MathUtils.lerp(-0.15, 0.25, departT),
+            1.6,
+            THREE.MathUtils.lerp(-3.35, -4.8, departT)
+          );
+          look.set(
+            THREE.MathUtils.lerp(-1.05, 0.1, departT),
+            1.48,
+            THREE.MathUtils.lerp(-5.25, -10.5, departT)
+          );
+        }
+      }
+      // ------------------------------------------------------------------------
+      // ステップ3: 席まで歩く & 着席（進捗 0.40 〜 0.70）
+      // ------------------------------------------------------------------------
+      else if (p <= STEP_RANGES.STEP3_END) {
+        const t = THREE.MathUtils.clamp((p - 0.40) / 0.30, 0, 1);
+
+        // 前半 (t: 0.0〜0.75) は通路を歩き、後半 (t: 0.75〜1.0) でテーブル前の席へ着席
+        if (t < 0.75) {
+          const walkT = t / 0.75;
+          // カウンター横を通り抜けて奥の客席 (Z=-12.3) へ
+          pos.x = THREE.MathUtils.lerp(0.25, 0.0, walkT);
+          pos.z = THREE.MathUtils.lerp(-4.8, -12.3, walkT);
+
+          // 歩行演出: カメラのY座標に微小なサイン波（ボビング効果）を加える
+          const walkBob = Math.abs(Math.sin(walkT * Math.PI * 7)) * 0.055;
+          const walkSway = Math.cos(walkT * Math.PI * 7) * 0.025;
+          pos.x += walkSway;
+          pos.y = 1.6 + walkBob;
+
+          look.set(0, 1.42, THREE.MathUtils.lerp(-10.5, -14.0, walkT));
+        } else {
+          // 着席フェーズ: アイレベル (1.6m) から着席レベル (1.2m) へスムーズに沈み込む
+          const sitT = THREE.MathUtils.smoothstep(t, 0.75, 1.0);
+          pos.x = 0;
+          pos.z = THREE.MathUtils.lerp(-12.3, -12.82, sitT);
+          pos.y = THREE.MathUtils.lerp(1.6, 1.2, sitT);
+
+          look.set(0, THREE.MathUtils.lerp(1.42, 1.05, sitT), -14.0);
+        }
+      }
+      // ------------------------------------------------------------------------
+      // ステップ4: 周りを見渡せる（進捗 0.70 〜 0.90）
+      // ------------------------------------------------------------------------
+      else if (p <= STEP_RANGES.STEP4_END) {
+        // 着席レベル (Y = 1.2m) を維持
+        pos.set(0, 1.2, -12.82);
+
+        // ポインター移動によるパン/チルト角度（水平±40度、垂直±15度）を反映
+        const baseLookDist = 2.2;
+        const yaw = state.currentLookYaw;
+        const pitch = state.currentLookPitch;
+
+        look.x = pos.x - Math.sin(yaw) * baseLookDist;
+        look.y = 1.08 + Math.sin(pitch) * baseLookDist;
+        look.z = pos.z - Math.cos(yaw) * Math.cos(pitch) * baseLookDist;
+      }
+      // ------------------------------------------------------------------------
+      // ステップ5: テーブル上の注文ボタンを押す（進捗 0.90 〜 1.00）
+      // ------------------------------------------------------------------------
+      else {
+        const t = THREE.MathUtils.smoothstep(p, 0.90, 1.00);
+        // 着席したままテーブル中央のオーダー端末 (Z=-13.76, Y=0.88) に視線をフォーカス
+        pos.set(0, 1.2, THREE.MathUtils.lerp(-12.82, -13.08, t));
+
+        const lookX = THREE.MathUtils.lerp(-Math.sin(state.currentLookYaw) * 1.5, 0, t);
+        const lookY = THREE.MathUtils.lerp(1.08, 0.88, t);
+        const lookZ = THREE.MathUtils.lerp(-14.0, -13.78, t);
+        look.set(lookX, lookY, lookZ);
+      }
+
+      // ステップ1のドア開閉ギミック（進捗 0.15 付近でスムーズに回転して開く）
+      if (doorPivotGroup) {
+        const doorOpenRatio = THREE.MathUtils.smoothstep(p, 0.09, 0.18);
+        const targetDoorAngle = -doorOpenRatio * Math.PI * 0.62; // 奥（店内側）へ約110度開く
+        doorPivotGroup.rotation.y = THREE.MathUtils.lerp(
+          doorPivotGroup.rotation.y,
+          targetDoorAngle,
+          0.12
+        );
+
+        // ドアが開くにつれて店内の明かりが温かく強まる演出
+        const lightBoost = THREE.MathUtils.lerp(0.65, 1.0, doorOpenRatio);
+        renderer.toneMappingExposure = THREE.MathUtils.lerp(0.95, 1.18, doorOpenRatio);
+        interiorLights.forEach((light, i) => {
+          const baseIntensities = [2.8, 3.2, 2.8, 3.5];
+          light.intensity = baseIntensities[i] * lightBoost;
+        });
+      }
+
+      state.cameraTargetPos.copy(pos);
+      state.cameraTargetLookAt.copy(look);
+    }
+
+    /* ==========================================================================
+       7. スクロールハンドリング & ステップ2スクロールロック制御
+       ========================================================================== */
+    function getMaxScrollY() {
+      return Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+    }
+
+    function scrollToNormalizedProgress(targetNormProgress) {
+      const maxScroll = getMaxScrollY();
+      window.scrollTo({
+        top: targetNormProgress * maxScroll,
+        behavior: 'smooth'
+      });
+    }
+
+    function handleWindowScroll() {
+      const maxScroll = getMaxScrollY();
+      const raw = THREE.MathUtils.clamp(window.scrollY / maxScroll, 0, 1);
+      state.rawScrollProgress = raw;
+
+      // ステップ2: 店員と会話するまでスクロール進行をロック
+      if (!state.hasTalkedToStaff && raw > STEP2_LOCK_PROGRESS) {
+        state.targetProgress = STEP2_LOCK_PROGRESS;
+        // 仮想スクロール位置自体もロック地点へ戻すことで通過を防止
+        window.scrollTo(0, STEP2_LOCK_PROGRESS * maxScroll);
+        emphasizeStep2LockGuide();
+      } else {
+        state.targetProgress = raw;
+      }
+    }
+
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+
+    /* ==========================================================================
+       8. UI要素の更新 & 3Dオブジェクトへのスクリーン座標投影
+       ========================================================================== */
+    const dom = {
+      stepBadgeNum: document.getElementById('step-badge-num'),
+      stepBadgeTitle: document.getElementById('step-badge-title'),
+      stepDots: Array.from(document.querySelectorAll('.step-dot-item')),
+      guideCard: document.getElementById('guide-card'),
+      guideTitle: document.getElementById('guide-title'),
+      guideDesc: document.getElementById('guide-desc'),
+      guideActionBtn: document.getElementById('guide-action-btn'),
+      progressFill: document.getElementById('progress-fill'),
+      lookAroundBanner: document.getElementById('look-around-banner'),
+      resetLookBtn: document.getElementById('reset-look-btn'),
+      staffCallout: document.getElementById('staff-callout'),
+      staffCalloutBtn: document.getElementById('staff-callout-btn'),
+      deviceCallout: document.getElementById('device-callout'),
+      deviceCalloutBtn: document.getElementById('device-callout-btn'),
+      staffSpeechBubble: document.getElementById('staff-speech-bubble'),
+      orderModalBackdrop: document.getElementById('order-modal-backdrop'),
+      modalCloseBtn: document.getElementById('modal-close-btn'),
+      appScreenMenu: document.getElementById('app-screen-menu'),
+      appScreenComplete: document.getElementById('app-screen-complete'),
+      submitOrderBtn: document.getElementById('submit-order-btn'),
+      ctaDownloadBtn: document.getElementById('cta-download-btn'),
+      backToMenuBtn: document.getElementById('back-to-menu-btn'),
+      orderTotalPrice: document.getElementById('order-total-price'),
+      toast: document.getElementById('toast-notification')
+    };
+
+    const STEP_METADATA = {
+      1: {
+        badge: 'ドアをくぐる',
+        title: '🚪 ステップ1: カフェの扉を開けて入店',
+        desc: '下にスクロールするとカメラが前進し、木の扉が自動で開いて店内の温かい明かりが広がります。',
+        btnText: 'カウンターへ進む ↓'
+      },
+      2: {
+        badge: '店員と会話',
+        title: '💬 ステップ2: カウンターの店員さんに声をかける',
+        desc: '店員オブジェクトをタップして会話すると、奥のテーブル席へのスクロールロックが解除されます。',
+        btnText: '店員さんと話す 💬'
+      },
+      3: {
+        badge: '席まで歩く',
+        title: '🚶 ステップ3: 案内された奥のテーブル席へ',
+        desc: '心地よい歩行リズムとともに通路を進み、テーブルに到着すると着席目線（1.2m）へ落ち着きます。',
+        btnText: '席に座る ↓'
+      },
+      4: {
+        badge: '店内を見渡す',
+        title: '👀 ステップ4: 着席してカフェ店内を見渡す',
+        desc: '画面をドラッグまたはスワイプして、周囲のインテリアや窓辺の雰囲気を自由に見渡せます。',
+        btnText: '注文ステップへ ↓'
+      },
+      5: {
+        badge: '卓上で注文',
+        title: '📱 ステップ5: テーブル上の端末をタップして注文',
+        desc: 'テーブル中央でパルス発光しているオーダー端末をタップして、モバイルオーダーを体験しましょう。',
+        btnText: '注文画面を開く 📱'
+      }
+    };
+
+    function updateHUDForStep(step) {
+      const meta = STEP_METADATA[step];
+      dom.stepBadgeNum.textContent = `STEP ${step} / 5`;
+      dom.stepBadgeTitle.textContent = meta.badge;
+      dom.guideTitle.textContent = meta.title;
+
+      if (step === 2 && state.hasTalkedToStaff) {
+        dom.guideDesc.textContent = '「いらっしゃいませ！こちらの席へどうぞ」— ロックが解除されました。下にスクロールして席へ進みましょう！';
+        dom.guideActionBtn.textContent = '奥の席へ進む ↓';
+        dom.guideCard.classList.remove('locked-emphasis');
+      } else {
+        dom.guideDesc.textContent = meta.desc;
+        dom.guideActionBtn.textContent = meta.btnText;
+      }
+
+      // ステップドットのハイライト更新
+      dom.stepDots.forEach((dot, idx) => {
+        const dotStep = idx + 1;
+        dot.classList.toggle('active', dotStep === step);
+        dot.classList.toggle('completed', dotStep < step || (dotStep === 2 && state.hasTalkedToStaff));
+      });
+
+      // ステップ4の見渡しバナー表示制御
+      dom.lookAroundBanner.classList.toggle('visible', step === 4);
+      canvas.classList.toggle('is-draggable', step === 4);
+
+      // ステップ2会話吹き出しの表示制御
+      const showSpeech = state.hasTalkedToStaff && state.smoothProgress >= 0.18 && state.smoothProgress <= 0.44;
+      dom.staffSpeechBubble.classList.toggle('visible', showSpeech);
+    }
+
+    function emphasizeStep2LockGuide() {
+      dom.guideCard.classList.add('locked-emphasis');
+    }
+
+    const tempProjVec = new THREE.Vector3();
+    function updateWorldCallouts() {
+      const p = state.smoothProgress;
+
+      // 店員頭上のコールアウト (ステップ2付近 & 未会話時)
+      const showStaffHint = p >= 0.17 && p <= 0.38 && !state.hasTalkedToStaff;
+      dom.staffCallout.classList.toggle('visible', showStaffHint);
+      if (showStaffHint) {
+        SCENE_ANCHORS.staff.getWorldPosition(tempProjVec);
+        tempProjVec.y += 1.98;
+        tempProjVec.project(camera);
+        if (tempProjVec.z < 1) {
+          const sx = (tempProjVec.x * 0.5 + 0.5) * window.innerWidth;
+          const sy = (-tempProjVec.y * 0.5 + 0.5) * window.innerHeight;
+          dom.staffCallout.style.left = `${sx}px`;
+          dom.staffCallout.style.top = `${sy}px`;
+        }
+      }
+
+      // 卓上オーダー端末上のコールアウト (ステップ5付近 & モーダル非表示時)
+      const showDeviceHint = p >= 0.86 && !state.isOrderModalOpen;
+      dom.deviceCallout.classList.toggle('visible', showDeviceHint);
+      if (showDeviceHint) {
+        SCENE_ANCHORS.orderDevice.getWorldPosition(tempProjVec);
+        tempProjVec.y += 0.34;
+        tempProjVec.project(camera);
+        if (tempProjVec.z < 1) {
+          const sx = (tempProjVec.x * 0.5 + 0.5) * window.innerWidth;
+          const sy = (-tempProjVec.y * 0.5 + 0.5) * window.innerHeight;
+          dom.deviceCallout.style.left = `${sx}px`;
+          dom.deviceCallout.style.top = `${sy}px`;
+        }
+      }
+    }
+
+    /* ==========================================================================
+       9. インタラクションアクション（店員との会話 & オーダーモーダル起動）
+       ========================================================================== */
+    function triggerTalkToStaff() {
+      if (!state.hasTalkedToStaff) {
+        state.hasTalkedToStaff = true;
+        state.staffGreetingTimer = 2.6; // 店員が笑顔で手を振る演出時間
+        dom.guideCard.classList.remove('locked-emphasis');
+        updateHUDForStep(state.currentStep);
+      } else {
+        state.staffGreetingTimer = 1.8;
+        dom.staffSpeechBubble.classList.add('visible');
+      }
+    }
+
+    function openOrderModal() {
+      state.isOrderModalOpen = true;
+      dom.orderModalBackdrop.classList.add('open');
+      dom.deviceCallout.classList.remove('visible');
+    }
+
+    function closeOrderModal() {
+      state.isOrderModalOpen = false;
+      dom.orderModalBackdrop.classList.remove('open');
+    }
+
+    /* ==========================================================================
+       10. Raycaster & PointerEvent（PCマウス・モバイルタッチ共通ハンドリング）
+       ========================================================================== */
+    const raycaster = new THREE.Raycaster();
+    const pointerNDC = new THREE.Vector2();
+
+    function updatePointerNDC(clientX, clientY) {
+      pointerNDC.x = (clientX / window.innerWidth) * 2 - 1;
+      pointerNDC.y = -(clientY / window.innerHeight) * 2 + 1;
+    }
+
+    function onCanvasPointerDown(e) {
+      // HTMLオーバーレイUI上のクリックであれば3D Raycasterを実行しない
+      if (e.target !== canvas) return;
+
+      state.isPointerDown = true;
+      state.pointerDragDistance = 0;
+      state.pointerDownPos.set(e.clientX, e.clientY);
+      state.lastPointerPos.set(e.clientX, e.clientY);
+
+      if (state.currentStep === 4) {
+        canvas.classList.add('is-dragging');
+      }
+    }
+
+    function onWindowPointerMove(e) {
+      // ホバー時のカーソル変更（PC向け）
+      if (!state.isPointerDown && e.target === canvas) {
+        updatePointerNDC(e.clientX, e.clientY);
+        raycaster.setFromCamera(pointerNDC, camera);
+
+        let hoveringClickable = false;
+        if (state.smoothProgress >= 0.16 && state.smoothProgress <= 0.42) {
+          hoveringClickable = raycaster.intersectObjects(staffInteractMeshes, false).length > 0;
+        } else if (state.smoothProgress >= 0.84) {
+          hoveringClickable = raycaster.intersectObjects(deviceInteractMeshes, false).length > 0;
+        }
+        canvas.classList.toggle('is-pointer', hoveringClickable);
+      }
+
+      if (!state.isPointerDown) return;
+
+      const dx = e.clientX - state.lastPointerPos.x;
+      const dy = e.clientY - state.lastPointerPos.y;
+      state.lastPointerPos.set(e.clientX, e.clientY);
+      state.pointerDragDistance += Math.hypot(dx, dy);
+
+      // ステップ4（または着席中）のドラッグ/スワイプによる視点移動（水平±40度、垂直±15度）
+      if (state.smoothProgress >= 0.66 && state.smoothProgress <= 0.94) {
+        const sensitivity = 0.0045;
+        const prevPitch = state.targetLookPitch;
+
+        state.targetLookYaw = THREE.MathUtils.clamp(
+          state.targetLookYaw - dx * sensitivity,
+          -LOOK_LIMIT_YAW,
+          LOOK_LIMIT_YAW
+        );
+        state.targetLookPitch = THREE.MathUtils.clamp(
+          state.targetLookPitch - dy * sensitivity,
+          -LOOK_LIMIT_PITCH,
+          LOOK_LIMIT_PITCH
+        );
+
+        // モバイルタッチ操作時、垂直チルト上限（±15度）に達した状態でさらに縦スワイプした場合はスクロールへ自然に繋げる
+        if (
+          e.pointerType === 'touch' &&
+          Math.abs(dy) > Math.abs(dx) * 1.2 &&
+          Math.abs(prevPitch) >= LOOK_LIMIT_PITCH * 0.96 &&
+          Math.sign(-dy) === Math.sign(prevPitch)
+        ) {
+          window.scrollBy(0, -dy * 2.2);
+        }
+      }
+    }
+
+    function onWindowPointerUp(e) {
+      if (!state.isPointerDown) return;
+      state.isPointerDown = false;
+      canvas.classList.remove('is-dragging');
+
+      // ドラッグではなくタップ/クリックだった場合のみ Raycaster 判定を実行
+      if (state.pointerDragDistance < 12 && e.target === canvas) {
+        updatePointerNDC(e.clientX, e.clientY);
+        raycaster.setFromCamera(pointerNDC, camera);
+
+        // ステップ2付近: 店員オブジェクトのタップ判定
+        if (state.smoothProgress >= 0.14 && state.smoothProgress <= 0.45) {
+          const hits = raycaster.intersectObjects(staffInteractMeshes, false);
+          if (hits.length > 0) {
+            triggerTalkToStaff();
+            return;
+          }
+        }
+
+        // ステップ5付近: テーブル上のオーダー端末オブジェクトのタップ判定
+        if (state.smoothProgress >= 0.80) {
+          const hits = raycaster.intersectObjects(deviceInteractMeshes, false);
+          if (hits.length > 0) {
+            openOrderModal();
+            return;
+          }
+        }
+      }
+    }
+
+    canvas.addEventListener('pointerdown', onCanvasPointerDown);
+    window.addEventListener('pointermove', onWindowPointerMove, { passive: true });
+    window.addEventListener('pointerup', onWindowPointerUp);
+    window.addEventListener('pointercancel', onWindowPointerUp);
+
+    /* ==========================================================================
+       11. UIボタン・モーダル内インタラクション設定
+       ========================================================================== */
+    // フローティングマーカーからのタップも3Dオブジェクトと同様に処理
+    dom.staffCalloutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerTalkToStaff();
+    });
+
+    dom.deviceCalloutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openOrderModal();
+    });
+
+    // ステップ4: 視点を正面に戻すボタン
+    dom.resetLookBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.targetLookYaw = 0;
+      state.targetLookPitch = 0;
+    });
+
+    // ボトムガイドの「次へ進む」アクションボタン
+    dom.guideActionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const s = state.currentStep;
+      if (s === 1) {
+        scrollToNormalizedProgress(STEP2_LOCK_PROGRESS);
+      } else if (s === 2) {
+        if (!state.hasTalkedToStaff) {
+          triggerTalkToStaff();
+        } else {
+          scrollToNormalizedProgress(0.68);
+        }
+      } else if (s === 3) {
+        scrollToNormalizedProgress(0.80);
+      } else if (s === 4) {
+        scrollToNormalizedProgress(0.98);
+      } else if (s === 5) {
+        openOrderModal();
+      }
+    });
+
+    // 右サイドのステップドットクリックで該当ステップへジャンプ
+    dom.stepDots.forEach((dot) => {
+      dot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const targetStep = Number(dot.dataset.step);
+        const stepTargets = { 1: 0.08, 2: 0.30, 3: 0.58, 4: 0.80, 5: 0.98 };
+        const destProgress = stepTargets[targetStep] ?? 0;
+
+        if (!state.hasTalkedToStaff && destProgress > STEP2_LOCK_PROGRESS) {
+          scrollToNormalizedProgress(STEP2_LOCK_PROGRESS);
+          emphasizeStep2LockGuide();
+        } else {
+          scrollToNormalizedProgress(destProgress);
+        }
+      });
+    });
+
+    // モバイルオーダーアプリのメニュー数量・金額計算
+    const menuQuantities = { latte: 1, croissant: 1, cake: 0 };
+    const menuPrices = { latte: 580, croissant: 420, cake: 650 };
+
+    function updateOrderSummaryUI() {
+      let total = 0;
+      Object.keys(menuQuantities).forEach((id) => {
+        const qty = menuQuantities[id];
+        total += qty * menuPrices[id];
+        const qtyEl = document.getElementById(`qty-${id}`);
+        if (qtyEl) qtyEl.textContent = String(qty);
+        const itemRow = document.querySelector(`.menu-item[data-id="${id}"]`);
+        if (itemRow) itemRow.classList.toggle('selected', qty > 0);
+      });
+      dom.orderTotalPrice.textContent = `¥${total.toLocaleString()}`;
+      dom.submitOrderBtn.disabled = total === 0;
+      dom.submitOrderBtn.style.opacity = total === 0 ? '0.5' : '1';
+    }
+
+    document.getElementById('menu-list').addEventListener('click', (e) => {
+      const btn = e.target.closest('.qty-btn');
+      const row = e.target.closest('.menu-item');
+      if (!row) return;
+      const id = row.dataset.id;
+
+      if (btn) {
+        const action = btn.dataset.action;
+        if (action === 'inc') menuQuantities[id] = Math.min(9, menuQuantities[id] + 1);
+        if (action === 'dec') menuQuantities[id] = Math.max(0, menuQuantities[id] - 1);
+      } else {
+        menuQuantities[id] = menuQuantities[id] > 0 ? 0 : 1;
+      }
+      updateOrderSummaryUI();
+    });
+
+    // 「注文を確定する」→「アプリで注文完了！」アニメーション画面へ切り替え
+    dom.submitOrderBtn.addEventListener('click', () => {
+      dom.appScreenMenu.style.display = 'none';
+      dom.appScreenComplete.style.display = 'block';
+    });
+
+    dom.backToMenuBtn.addEventListener('click', () => {
+      dom.appScreenComplete.style.display = 'none';
+      dom.appScreenMenu.style.display = 'block';
+    });
+
+    dom.modalCloseBtn.addEventListener('click', closeOrderModal);
+    dom.orderModalBackdrop.addEventListener('click', (e) => {
+      if (e.target === dom.orderModalBackdrop) closeOrderModal();
+    });
+
+    // CTAボタン（「アプリをダウンロード」）
+    let toastTimer = null;
+    dom.ctaDownloadBtn.addEventListener('click', () => {
+      dom.toast.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        dom.toast.classList.remove('show');
+      }, 3200);
+    });
+
+    /* ==========================================================================
+       12. レスポンシブ対応（リサイズハンドラ & スマホ縦画面FOV補正）
+       ========================================================================== */
+    function updateCameraAspectAndFOV() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const aspect = w / h;
+      camera.aspect = aspect;
+
+      // スマホ縦画面（aspect < 1.0）でも左右のインテリアやドア・店員が見切れないようFOVを動的に調整
+      if (aspect < 1.0) {
+        camera.fov = THREE.MathUtils.clamp(55 / Math.pow(aspect, 0.42), 58, 82);
+      } else {
+        camera.fov = 55;
+      }
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
+
+    window.addEventListener('resize', updateCameraAspectAndFOV);
+    updateCameraAspectAndFOV();
+
+    /* ==========================================================================
+       13. メインアニメーションループ（requestAnimationFrame & 線形補間 lerp）
+       ========================================================================== */
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = Math.min(clock.getDelta(), 0.1);
+      const elapsedTime = clock.getElapsedTime();
+
+      // 1. スクロール進捗の滑らかな線形補間（lerp）
+      state.smoothProgress = THREE.MathUtils.lerp(
+        state.smoothProgress,
+        state.targetProgress,
+        0.085
+      );
+
+      // 2. ステップ4の見渡し角度の滑らかな慣性補間（lerp）
+      // ステップ4以外に移行した際は徐々に正面へ戻す
+      if (state.currentStep !== 4) {
+        state.targetLookYaw = THREE.MathUtils.lerp(state.targetLookYaw, 0, 0.06);
+        state.targetLookPitch = THREE.MathUtils.lerp(state.targetLookPitch, 0, 0.06);
+      }
+      state.currentLookYaw = THREE.MathUtils.lerp(state.currentLookYaw, state.targetLookYaw, 0.1);
+      state.currentLookPitch = THREE.MathUtils.lerp(state.currentLookPitch, state.targetLookPitch, 0.1);
+
+      // 3. 進捗に基づく目標カメラ座標・注視点・ギミックの更新
+      evaluateStoryAtProgress(state.smoothProgress, elapsedTime);
+
+      // 4. カメラ位置と注視点（LookAt）の慣性補間
+      state.cameraPos.lerp(state.cameraTargetPos, 0.1);
+      state.cameraLookAt.lerp(state.cameraTargetLookAt, 0.1);
+      camera.position.copy(state.cameraPos);
+      camera.lookAt(state.cameraLookAt);
+
+      // 5. 店員キャラクターのアイドルアニメーション＆会話時の挨拶モーション
+      if (staffCharacterRefs) {
+        // 呼吸のような微小上下揺れ
+        staffCharacterRefs.bodyRoot.position.y = Math.sin(elapsedTime * 2.4) * 0.015;
+        staffCharacterRefs.headGroup.rotation.y = Math.sin(elapsedTime * 1.2) * 0.08;
+
+        if (state.staffGreetingTimer > 0) {
+          state.staffGreetingTimer = Math.max(0, state.staffGreetingTimer - delta);
+          // 右手を挙げて笑顔で振るモーション
+          staffCharacterRefs.rightArmPivot.rotation.z = -1.85 + Math.sin(elapsedTime * 14) * 0.32;
+          staffCharacterRefs.headGroup.rotation.x = Math.sin(elapsedTime * 6) * 0.08;
+        } else {
+          staffCharacterRefs.rightArmPivot.rotation.z = THREE.MathUtils.lerp(
+            staffCharacterRefs.rightArmPivot.rotation.z,
+            0,
+            0.12
+          );
+          staffCharacterRefs.headGroup.rotation.x = THREE.MathUtils.lerp(
+            staffCharacterRefs.headGroup.rotation.x,
+            0,
+            0.12
+          );
+        }
+      }
+
+      // 6. 卓上オーダー端末のパルス発光アニメーション（ステップ5で強調）
+      if (orderDeviceRefs) {
+        const isStep5Near = state.smoothProgress >= 0.82;
+        const pulseSpeed = isStep5Near ? 4.2 : 2.2;
+        const wave = (Math.sin(elapsedTime * pulseSpeed) + 1) * 0.5; // 0.0 〜 1.0
+
+        // スクリーンの発光強度と本体の微小スケール脈動
+        orderDeviceRefs.screenMat.emissiveIntensity = isStep5Near
+          ? THREE.MathUtils.lerp(0.45, 1.35, wave)
+          : THREE.MathUtils.lerp(0.25, 0.55, wave);
+
+        const scalePulse = isStep5Near ? 1 + wave * 0.065 : 1 + wave * 0.02;
+        orderDeviceRefs.visualRoot.scale.setScalar(scalePulse);
+
+        // 台座周りの波紋リング演出
+        const ringScale = 1 + ((elapsedTime * 0.85) % 1) * (isStep5Near ? 0.85 : 0.4);
+        orderDeviceRefs.pulseRing.scale.setScalar(ringScale);
+        orderDeviceRefs.pulseRingMat.opacity = (1 - ((elapsedTime * 0.85) % 1)) * (isStep5Near ? 0.85 : 0.35);
+
+        orderDeviceRefs.deviceGlowLight.intensity = isStep5Near
+          ? THREE.MathUtils.lerp(0.6, 1.5, wave)
+          : 0.45;
+      }
+
+      // 7. ステップ遷移の検知とUI更新
+      const newStep = getStepFromProgress(state.smoothProgress);
+      if (newStep !== state.currentStep) {
+        state.currentStep = newStep;
+        updateHUDForStep(newStep);
+      } else if (state.currentStep === 2) {
+        // ステップ2中の吹き出し表示状態を滑らかに反映
+        const showSpeech = state.hasTalkedToStaff && state.smoothProgress >= 0.18 && state.smoothProgress <= 0.44;
+        dom.staffSpeechBubble.classList.toggle('visible', showSpeech);
+      }
+
+      // スクロール進捗バーの更新
+      dom.progressFill.style.width = `${(state.smoothProgress * 100).toFixed(1)}%`;
+
+      // 3D空間座標に連動するコールアウト位置更新
+      updateWorldCallouts();
+
+      // レンダリング実行
+      renderer.render(scene, camera);
+    }
+
+    // 初回UI更新 & ループ開始
+    updateHUDForStep(1);
+    animate();
+
+    /* ==========================================================================
+       14. メモリリーク防止用クリーンアップ処理（ページアンロード時）
+       ========================================================================== */
+    function cleanupResources() {
+      window.removeEventListener('scroll', handleWindowScroll);
+      window.removeEventListener('resize', updateCameraAspectAndFOV);
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('pointercancel', onWindowPointerUp);
+      canvas.removeEventListener('pointerdown', onCanvasPointerDown);
+
+      scene.traverse((obj) => {
+        if (obj.isMesh) {
+          if (obj.geometry) obj.geometry.dispose();
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m) => m.dispose());
+          } else if (obj.material) {
+            if (obj.material.map) obj.material.map.dispose();
+            obj.material.dispose();
+          }
+        }
+      });
+      renderer.dispose();
+    }
+
+    window.addEventListener('beforeunload', cleanupResources);
+  </script>
+</body>
+</html>
